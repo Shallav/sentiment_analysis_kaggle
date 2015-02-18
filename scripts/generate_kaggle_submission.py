@@ -27,22 +27,34 @@ if __name__ == "__main__":
     import argparse
     import json
     import csv
-    import sys
 
     from samr.corpus import iter_corpus, iter_test_corpus
     from samr.predictor import PhraseSentimentPredictor
+     
+    trainFile = 'train_mini.tsv'
+    testFile = 'test_mini.tsv'
 
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("filename")
+    parser.add_argument("numModel")
     config = parser.parse_args()
+    numModel = config.numModel
     config = json.load(open(config.filename))
 
     predictor = PhraseSentimentPredictor(**config)
-    predictor.fit(list(iter_corpus()))
-    test = list(iter_test_corpus())
+    predictor.fit(list(iter_corpus(trainFile)))
+    test = list(iter_test_corpus(testFile))
     prediction = predictor.predict(test)
 
-    writer = csv.writer(sys.stdout)
+    # writer = csv.writer(sys.stdout)
+    # writer.writerow(("PhraseId", "Sentiment"))
+    # for datapoint, sentiment in zip(test, prediction):
+    #     writer.writerow((datapoint.phraseid, sentiment))
+
+    outFile = 'submission' + str(numModel) + '.csv'
+    output = open(outFile, 'wb')
+    writer = csv.writer(output)
     writer.writerow(("PhraseId", "Sentiment"))
     for datapoint, sentiment in zip(test, prediction):
         writer.writerow((datapoint.phraseid, sentiment))
+    output.close()

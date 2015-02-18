@@ -3,12 +3,20 @@ This module implements several scikit-learn compatible transformers, see
 scikit-learn documentation for the convension fit/transform convensions.
 """
 
+
 import numpy
 import re
 
 from sklearn.linear_model import SGDClassifier
 from sklearn.multiclass import fit_ovo
 import nltk
+from nltk import pos_tag
+from nltk.tokenize import word_tokenize
+from nltk.chunk import RegexpParser
+
+from textblob import TextBlob
+
+from corpus import importCSV
 
 
 class StatelessTransform:
@@ -130,3 +138,81 @@ class ClassifierOvOAsFeatures:
         """
         xs = [clf.decision_function(X).reshape(-1, 1) for clf in self.classifiers]
         return numpy.hstack(xs)
+
+class POSTagger(StatelessTransform):
+    def transform(self, X):
+        """
+        `X` is expected to be a list of `str` instances.
+        It returns a list of `str` instances such that the i-th element
+        contains a list of parts of speech for that sentence, as tagged by nltk.tag.pos_tag
+
+        `X[i]` is internally tokenized using nltk.tokenize.word_tokenizer.
+        """
+        print "Tagging POS"
+        returnVal = [self._tag_sentences(x) for x in X]
+        return returnVal
+
+    def _tag_sentences(self, text):
+
+        word_tuples = pos_tag(word_tokenize(text))
+
+        grammar = """
+            NP: {<DT>? <JJ>* <NN>* | <PRP>?<JJ.*>*<NN.*>+}
+            P: {<IN>}
+            V: {<V.* | VB.*>}
+            PP: {<P> <NP>}
+            VP: {<V> <NP|PP>*}
+            CP:   {<JJR|JJS>}
+            THAN: {<IN>}
+            COMP: {<DT>?<NP><RB>?<VERB><DT>?<CP><THAN><DT>?<NP>}
+            """
+        chunker = RegexpParser(grammar)
+        chunked_text = str(chunker.parse(word_tuples))
+        cleaned_chunked_text = self._clean_chunked_text(chunked_text)
+
+        return cleaned_chunked_text
+
+    def _clean_chunked_text(self, chunked_text):
+        chunked_text = re.sub(r"\n", '', chunked_text)
+        chunked_text = re.sub(r" '?\w+/", ' ', chunked_text)
+        return chunked_text
+
+class SentimentChangerTagger(StatelessTransform):
+    def transform(self, X):
+        print "Tagging SentimentChangers"
+        negators = importCSV('negators.csv')
+        intensifiers = importCSV('intensifiers.csv')
+        diminishers = importCSV('diminishers.csv')
+        contrasters = importCSV('contrasters.csv')
+
+        changers = {'negators': negators, 'intensifiers': intensifiers, 'diminishers': diminishers, 'contrasters': contrasters}
+        result = [self._sentiment_tag(phrase, changers) for phrase in X]
+        return result
+
+    def _sentiment_tag(self, phrase, changers):
+        results = []
+        for type in changers:
+            results.append(self._sub_sentiment_tag(phrase, changers[type], type))
+        return " ".join(results).strip()
+
+
+    def _sub_sentiment_tag(self, phrase, sentiment_list, type):
+        results = [type for x in sentiment_list if x.strip().lower() in phrase.lower()]
+        return " ".join(results)
+
+class Polarity_And_Subjectivity(StatelessTransform):
+    def transform(self, X):
+        print "Adding polarity and subjectivity"
+        returnVal = [self._add_polarity_and_subjectivity(x) for x in X]
+        return returnVal
+
+    def _add_polarity_and_subjectivity(self, phrase):
+        blob = TextBlob(phrase)
+        if len(blob.sentences) == 0:
+            polarity = 2
+            subjectivity = 0.5
+        else:
+            polarity = blob.sentences[0].sentiment.polarity + 2 # to prevent negative polarity for Naive Bayes
+            subjectivity = blob.sentences[0].sentiment.subjectivity
+        return [polarity, subjectivity]
+

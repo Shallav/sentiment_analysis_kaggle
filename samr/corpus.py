@@ -5,6 +5,14 @@ import random
 from samr.data import Datapoint
 from samr.settings import DATA_PATH
 
+def importCSV(filename):
+    path = os.path.join(DATA_PATH, filename)
+    it = csv.reader(open(path, "r"), delimiter=",")
+    contents = []
+    for row in it:
+        contents.append(row)
+    return contents[0]
+
 
 def _iter_data_file(filename):
     path = os.path.join(DATA_PATH, filename)
@@ -18,20 +26,20 @@ def _iter_data_file(filename):
         yield Datapoint(*row)
 
 
-def iter_corpus(__cached=[]):
+def iter_corpus(filename, __cached=[]):
     """
     Returns an iterable of `Datapoint`s with the contents of train.tsv.
     """
     if not __cached:
-        __cached.extend(_iter_data_file("train.tsv"))
+        __cached.extend(_iter_data_file(filename))
     return __cached
 
 
-def iter_test_corpus():
+def iter_test_corpus(filename):
     """
     Returns an iterable of `Datapoint`s with the contents of test.tsv.
     """
-    return list(_iter_data_file("test.tsv"))
+    return list(_iter_data_file(filename))
 
 
 def make_train_test_split(seed, proportion=0.9):

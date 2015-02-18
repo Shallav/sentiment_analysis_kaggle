@@ -11,10 +11,17 @@ from sklearn.ensemble import RandomForestClassifier
 from sklearn.feature_extraction.text import CountVectorizer
 from sklearn.pipeline import make_pipeline, make_union
 from sklearn.metrics import accuracy_score
+from sklearn.metrics.pairwise import cosine_similarity
+from sklearn.naive_bayes import GaussianNB
+from sklearn.ensemble import AdaBoostClassifier
+from sklearn.ensemble import GradientBoostingClassifier
 
-from samr.transformations import (ExtractText, ReplaceText, MapToSynsets,
-                                  Densifier, ClassifierOvOAsFeatures)
+
+from samr.transformations import (ExtractText, ReplaceText, MapToSynsets, POSTagger, SentimentChangerTagger,
+                                  Polarity_And_Subjectivity, Densifier, ClassifierOvOAsFeatures)
 from samr.inquirer_lex_transform import InquirerLexTransform
+import numpy as np
+np.set_printoptions(threshold=np.nan)
 
 
 _valid_classifiers = {
@@ -22,6 +29,9 @@ _valid_classifiers = {
     "knn": KNeighborsClassifier,
     "svc": SVC,
     "randomforest": RandomForestClassifier,
+    "naiveBayes": GaussianNB,
+    "adaBoost": AdaBoostClassifier,
+    "gradientBoosting": GradientBoostingClassifier
 }
 
 
@@ -31,7 +41,7 @@ def target(phrases):
 
 class PhraseSentimentPredictor:
     """
-    Main `samr` class. It implements a trainable predictor for phrase
+    Main `samr-develop` class. It implements a trainable predictor for phrase
     sentiments. API is a-la scikit-learn, where:
         - `__init__` configures the predictor
         - `fit` trains the predictor from data. After calling `fit` the instance
@@ -55,7 +65,7 @@ class PhraseSentimentPredictor:
     def __init__(self, classifier="sgd", classifier_args=None, lowercase=True,
                  text_replacements=None, map_to_synsets=False, binary=False,
                  min_df=0, ngram=1, stopwords=None, limit_train=None,
-                 map_to_lex=False, duplicates=False):
+                 map_to_lex=False, duplicates=False, pos_tagger=False, sentiment_changer_tagger=False, polarity_subjectivity=False):
         """
         Parameter description:
             - `classifier`: The type of classifier used as main classifier,
@@ -98,9 +108,20 @@ class PhraseSentimentPredictor:
         # Build feature extraction schemes
         ext = [build_text_extraction(binary=binary, min_df=min_df,
                                      ngram=ngram, stopwords=stopwords)]
+
+        if pos_tagger:
+            ext.append(build_POS_extraction(binary=binary, min_df=min_df, ngram=ngram))
+
+        if sentiment_changer_tagger:
+            ext.append(build_sentimentChangerTagger_extraction(binary=binary, min_df=min_df, ngram=ngram))
+
         if map_to_synsets:
             ext.append(build_synset_extraction(binary=binary, min_df=min_df,
                                                ngram=ngram))
+
+        if polarity_subjectivity:
+            ext.append(build_polarity_subjectivity())
+
         if map_to_lex:
             ext.append(build_lex_extraction(binary=binary, min_df=min_df,
                                             ngram=ngram))
@@ -110,9 +131,26 @@ class PhraseSentimentPredictor:
         # Build classifier and put everything togheter
         if classifier_args is None:
             classifier_args = {}
+        classifier_args = self.convert_unicode_to_string(classifier_args)
         classifier = _valid_classifiers[classifier](**classifier_args)
         self.pipeline = make_pipeline(*pipeline)
         self.classifier = classifier
+
+    def convert_unicode_to_string(self, dict):
+        new_dict = {}
+        for key in dict.keys():
+            if isinstance(key, unicode):
+                new_key = key.encode('ascii','ignore')
+            else:
+                new_key = key
+
+            value = dict[key]
+            if isinstance(value, unicode):
+                new_value = value.encode('ascii', 'ignore')
+            else:
+                new_value = value
+            new_dict[new_key] = new_value
+        return new_dict
 
     def fit(self, phrases, y=None):
         """
@@ -120,11 +158,13 @@ class PhraseSentimentPredictor:
         `y` should be a list of `str` instances representing the sentiments to
         be learnt.
         """
+        print "Fitting"
         y = target(phrases)
         if self.duplicates:
             self.dupes = DuplicatesHandler()
             self.dupes.fit(phrases, y)
         Z = self.pipeline.fit_transform(phrases, y)
+
         if self.limit_train:
             self.classifier.fit(Z[:self.limit_train], y[:self.limit_train])
         else:
@@ -136,7 +176,9 @@ class PhraseSentimentPredictor:
         `phrases` should be a list of `Datapoint` instances.
         Return value is a list of `str` instances with the predicted sentiments.
         """
+        print "Predicting"
         Z = self.pipeline.transform(phrases)
+
         labels = self.classifier.predict(Z)
         if self.duplicates:
             for i, phrase in enumerate(phrases):
@@ -180,6 +222,22 @@ def build_synset_extraction(binary, min_df, ngram):
                                          ngram_range=(1, ngram)),
                          ClassifierOvOAsFeatures())
 
+def build_POS_extraction(binary, min_df, ngram):
+    return make_pipeline(POSTagger(),
+                         CountVectorizer(binary=binary,
+                                         tokenizer=lambda x: x.split(),
+                                         min_df=min_df,
+                                         ngram_range=(1, ngram)),
+                         ClassifierOvOAsFeatures())
+
+def build_sentimentChangerTagger_extraction(binary, min_df, ngram):
+    return make_pipeline(SentimentChangerTagger(),
+                         CountVectorizer(binary=binary,
+                                         tokenizer=lambda x: x.split(),
+                                         min_df=min_df,
+                                         ngram_range=(1, ngram)),
+                         ClassifierOvOAsFeatures())
+
 
 def build_lex_extraction(binary, min_df, ngram):
     return make_pipeline(InquirerLexTransform(),
@@ -189,6 +247,8 @@ def build_lex_extraction(binary, min_df, ngram):
                                          ngram_range=(1, ngram)),
                          Densifier())
 
+def build_polarity_subjectivity():
+    return make_pipeline(Polarity_And_Subjectivity())
 
 class DuplicatesHandler:
     def fit(self, phrases, target):
